@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Pulse Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Orbitron:wght@700&display=swap');
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #080c14;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 2rem 1rem;
+            background-image: radial-gradient(ellipse at 20% 20%, rgba(14, 165, 233, 0.05) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 80%, rgba(239, 68, 68, 0.05) 0%, transparent 60%);
+        }
+
+        .header {
+            width: 100%;
+            max-width: 880px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .header h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.2rem;
+            color: #38bdf8;
+            letter-spacing: 2px;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #64748b;
+            margin-right: 8px;
+            transition: background 0.4s;
+            animation: none;
+        }
+
+        .status-dot.live {
+            background: #22c55e;
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        .status-dot.error {
+            background: #ef4444;
+        }
+
+        @keyframes pulse-dot {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+            }
+
+            50% {
+                box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+            }
+        }
+
+        .dashboard {
+            width: 100%;
+            max-width: 880px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        /* --- COUNTDOWN SECTION --- */
+        #countdown-section {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 2.5rem;
+            text-align: center;
+        }
+
+        #countdown-section p {
+            color: #94a3b8;
+            font-size: 1rem;
+            margin-bottom: 0.8rem;
+        }
+
+        #tick {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 5rem;
+            color: #facc15;
+            line-height: 1;
+            text-shadow: 0 0 30px rgba(250, 204, 21, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        /* --- METRICS ROW --- */
+        .metrics-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .metric-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 1.5rem;
+            text-align: center;
+            transition: border-color 0.3s;
+        }
+
+        .metric-card:hover {
+            border-color: rgba(56, 189, 248, 0.3);
+        }
+
+        .metric-label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #64748b;
+            margin-bottom: 0.6rem;
+        }
+
+        .metric-value {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2.4rem;
+            font-weight: 700;
+            color: #38bdf8;
+            line-height: 1;
+            transition: color 0.4s;
+        }
+
+        .metric-value.warning {
+            color: #f97316;
+        }
+
+        .metric-value.danger {
+            color: #ef4444;
+        }
+
+        .metric-value.calibrating {
+            color: #64748b;
+            font-size: 1.4rem;
+        }
+
+        .metric-unit {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            margin-top: 0.4rem;
+        }
+
+        /* --- CHART SECTION --- */
+        .chart-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+
+        .chart-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #64748b;
+            margin-bottom: 1rem;
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 220px;
+            width: 100%;
+        }
+
+        /* --- CONTROLS --- */
+        .controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 1.2rem 1.5rem;
+        }
+
+        #status-text {
+            font-size: 0.9rem;
+            color: #64748b;
+            max-width: 60%;
+        }
+
+        #status-text.success {
+            color: #22c55e;
+        }
+
+        #status-text.error {
+            color: #ef4444;
+        }
+
+        #stopBtn {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+            border: none;
+            padding: 0.7rem 1.6rem;
+            font-size: 0.95rem;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        #stopBtn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+        }
+
+        #stopBtn:disabled {
+            background: #334155;
+            color: #64748b;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Heartbeat glow animation on the BPM card */
+        @keyframes heartbeat {
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            14% {
+                transform: scale(1.05);
+            }
+
+            28% {
+                transform: scale(1);
+            }
+
+            42% {
+                transform: scale(1.03);
+            }
+        }
+
+        .heartbeat {
+            animation: heartbeat 1s ease-in-out;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        <h1>⬤ mmWave Pulse Monitor</h1>
+        <div style="font-size: 0.85rem; color: #94a3b8;">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusLabel">Connecting...</span>
+        </div>
+    </div>
+
+    <div class="dashboard">
+
+        <!-- Countdown -->
+        <div id="countdown-section">
+            <p>Sensor calibrating — prediction begins in</p>
+            <div id="tick">30</div>
+        </div>
+
+        <!-- Metrics row (hidden until countdown ends) -->
+        <div class="metrics-row" id="metrics-row" style="display:none;">
+            <div class="metric-card">
+                <div class="metric-label">Heart Rate</div>
+                <div class="metric-value calibrating" id="bpmVal">--</div>
+                <div class="metric-unit">BPM</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Status</div>
+                <div class="metric-value" id="bpmStatus" style="font-size:1.1rem; padding-top:0.6rem; color:#94a3b8;">
+                    Calibrating</div>
+                <div class="metric-unit">&nbsp;</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Samples</div>
+                <div class="metric-value" id="sampleCount" style="font-size: 1.8rem;">0</div>
+                <div class="metric-unit">collected</div>
+            </div>
+        </div>
+
+        <!-- Live Chart -->
+        <div class="chart-card">
+            <div class="chart-title">📡 Live Radar Phase Signal (Wrist Movement)</div>
+            <div class="chart-wrapper">
+                <canvas id="pulseChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <div id="status-text">📁 Recording wrist data to CSV... Press Stop to save and exit.</div>
+            <button id="stopBtn" onclick="stopCapture()">⏹ Stop &amp; Save</button>
+        </div>
+
+    </div>
+
+    <script>
+        // =========================================================
+        //  Chart Setup
+        // =========================================================
+        const ctx = document.getElementById('pulseChart').getContext('2d');
+        const MAX_POINTS = 600; // ~30 seconds at 20fps
+
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Phase Shift',
+                    data: [],
+                    borderColor: '#22d3ee',
+                    backgroundColor: (context) => {
+                        const gradient = context.chart.ctx.createLinearGradient(0, 0, 0, 220);
+                        gradient.addColorStop(0, 'rgba(34,211,238,0.25)');
+                        gradient.addColorStop(1, 'rgba(34,211,238,0)');
+                        return gradient;
+                    },
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.35,
+                    fill: true
+                }]
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'none' },
+                scales: {
+                    x: {
+                        display: false
+                    },
+                    y: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#64748b', font: { size: 11 } },
+                        border: { color: 'rgba(255,255,255,0.08)' }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { enabled: false }
+                }
+            }
+        });
+
+        // =========================================================
+        //  State
+        // =========================================================
+        let countdown = 30;
+        let calibrated = false;
+        let sampleCount = 0;
+        let lastBpm = 0;
+        let ws = null;
+        let isStopped = false;
+
+        const tickEl = document.getElementById('tick');
+        const bpmValEl = document.getElementById('bpmVal');
+        const bpmStatusEl = document.getElementById('bpmStatus');
+        const sampleEl = document.getElementById('sampleCount');
+        const metricsRow = document.getElementById('metrics-row');
+        const countdownSec = document.getElementById('countdown-section');
+        const statusDot = document.getElementById('statusDot');
+        const statusLabelEl = document.getElementById('statusLabel');
+        const statusTextEl = document.getElementById('status-text');
+
+        // =========================================================
+        //  Countdown Timer
+        // =========================================================
+        const cdInterval = setInterval(() => {
+            countdown--;
+            tickEl.innerText = countdown;
+            if (countdown <= 0) {
+                clearInterval(cdInterval);
+                // Swap sections
+                countdownSec.style.display = 'none';
+                metricsRow.style.display = 'grid';
+                calibrated = true;
+            }
+        }, 1000);
+
+        // =========================================================
+        //  WebSocket connection — always point to backend
+        // =========================================================
+        function connectWS() {
+            // If served from FastAPI, use same host; fallback to localhost:8000
+            const host = (window.location.host && window.location.protocol !== 'file:')
+                ? window.location.host
+                : 'localhost:8000';
+            const wsUrl = `ws://${host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                statusDot.classList.add('live');
+                statusLabelEl.innerText = 'Live';
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const d = JSON.parse(event.data);
+                    sampleCount++;
+
+                    // --- Update chart ---
+                    chart.data.labels.push(d.timestamp.toFixed(1));
+                    chart.data.datasets[0].data.push(d.phase);
+                    if (chart.data.labels.length > MAX_POINTS) {
+                        chart.data.labels.shift();
+                        chart.data.datasets[0].data.shift();
+                    }
+                    chart.update('none'); // 'none' skips animation for performance
+
+                    // --- Update sample counter ---
+                    if (sampleEl) sampleEl.innerText = sampleCount;
+
+                    // --- Update BPM after calibration ---
+                    if (calibrated && d.bpm > 0) {
+                        updateBPM(d.bpm);
+                    }
+
+                    // --- Radar status ---
+                    if (d.radar === 'error') {
+                        statusDot.classList.remove('live');
+                        statusDot.classList.add('error');
+                        statusLabelEl.innerText = 'Radar Error';
+                    }
+
+                } catch (err) {
+                    console.error('WS parse error:', err);
+                }
+            };
+
+            ws.onerror = () => {
+                statusDot.classList.remove('live');
+                statusDot.classList.add('error');
+                statusLabelEl.innerText = 'Connection failed';
+            };
+
+            ws.onclose = () => {
+                if (!isStopped) {
+                    statusDot.classList.remove('live');
+                    statusLabelEl.innerText = 'Disconnected';
+                    // Retry connection after 2 seconds
+                    setTimeout(connectWS, 2000);
+                }
+            };
+        }
+
+        connectWS();
+
+        // =========================================================
+        //  BPM Display Logic
+        // =========================================================
+        function updateBPM(bpm) {
+            if (bpm === lastBpm) return;
+            lastBpm = bpm;
+
+            bpmValEl.innerText = bpm;
+            bpmValEl.classList.remove('calibrating', 'warning', 'danger');
+
+            if (bpm < 50 || bpm > 120) {
+                bpmValEl.classList.add('danger');
+                bpmStatusEl.innerText = '⚠ Abnormal';
+                bpmStatusEl.style.color = '#ef4444';
+            } else if (bpm < 60 || bpm > 100) {
+                bpmValEl.classList.add('warning');
+                bpmStatusEl.innerText = '● Borderline';
+                bpmStatusEl.style.color = '#f97316';
+            } else {
+                bpmStatusEl.innerText = '✓ Normal';
+                bpmStatusEl.style.color = '#22c55e';
+            }
+
+            // Trigger heartbeat animation
+            bpmValEl.classList.remove('heartbeat');
+            void bpmValEl.offsetWidth; // reflow to restart animation
+            bpmValEl.classList.add('heartbeat');
+        }
+
+        // =========================================================
+        //  Stop Button
+        // =========================================================
+        function stopCapture() {
+            if (isStopped) return;
+            isStopped = true;
+
+            const btn = document.getElementById('stopBtn');
+            btn.disabled = true;
+            btn.innerText = 'Saving...';
+            statusTextEl.innerText = '⏳ Stopping radar and saving file...';
+
+            fetch('http://localhost:8000/stop', { method: 'POST' })
+                .then(r => r.json())
+                .then(d => {
+                    if (ws) ws.close();
+                    statusDot.classList.remove('live');
+                    statusLabelEl.innerText = 'Stopped';
+                    statusTextEl.className = 'success';
+                    statusTextEl.innerText = `✅ Saved: ${d.file}`;
+                    btn.innerText = '✓ Saved';
+                })
+                .catch(() => {
+                    statusTextEl.className = 'error';
+                    statusTextEl.innerText = '❌ Error stopping. Check terminal.';
+                    btn.disabled = false;
+                    btn.innerText = '⏹ Stop & Save';
+                    isStopped = false;
+                });
+        }
+    </script>
+</body>
+
+</html>
