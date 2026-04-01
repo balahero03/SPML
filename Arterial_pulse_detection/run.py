@@ -14,8 +14,8 @@ from pulse_extract import estimate_rowwise_bpm, estimate_session_bpm
 
 CFG_FILE = Path(__file__).with_name("xwr68xx_profile_VitalSigns_20fps_Front.cfg")
 
-CLI_PORT = "COM4"
-DATA_PORT = "COM3"
+CLI_PORT = "COM10"
+DATA_PORT = "COM9"
 
 CLI_BAUD = 115200
 DATA_BAUD = 921600

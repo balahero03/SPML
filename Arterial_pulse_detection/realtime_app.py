@@ -8,6 +8,7 @@ import numpy as np
 import asyncio
 import threading
 from scipy.signal import butter, lfilter, find_peaks
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +17,28 @@ import uvicorn
 # ===============================
 # APP INITIALIZATION
 # ===============================
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    threading.Thread(target=radar_thread, daemon=True).start()
+    threading.Thread(target=calculate_bpm_thread, daemon=True).start()
+    print("[Server] Started. Open http://localhost:8000 in your browser.")
+    yield
+    # Shutdown
+    global is_running
+    is_running = False
+    csv_file.close()
+    try:
+        if cli_serial and cli_serial.is_open:
+            cli_serial.write(b'sensorStop\n')
+            cli_serial.close()
+        if data_serial and data_serial.is_open:
+            data_serial.close()
+    except Exception:
+        pass
+    print(f"[Server] Shutdown complete. Data saved to: {CSV_FILE}")
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,12 +50,12 @@ app.add_middleware(
 # ===============================
 # SENSOR SETTINGS — Edit these if your COM ports differ
 # ===============================
-CFG_FILE = r"C:\Users\bala3\Downloads\mm\xwr68xx_profile_VitalSigns_20fps_Front.cfg"
-CLI_PORT = 'COM4'
-DATA_PORT = 'COM3'
+CFG_FILE = os.path.join(os.path.dirname(__file__), "xwr68xx_profile_VitalSigns_20fps_Front.cfg")
+CLI_PORT = 'COM10'
+DATA_PORT = 'COM9'
 CLI_BAUD = 115200
 DATA_BAUD = 921600
-SAVE_DIR = r"C:\Users\bala3\Downloads\mm"
+SAVE_DIR = os.path.dirname(__file__)
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 CSV_FILE = os.path.join(SAVE_DIR, f"pulse_live_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
@@ -186,8 +208,8 @@ def calculate_bpm_thread():
     while is_running:
         time.sleep(1)  # Recalculate every second
 
-        # Need at least half the window (15 sec) before we start calculating
-        if len(phase_buffer) < WINDOW_SIZE // 2:
+        # Need at least 10 sec (200 samples) before we start calculating
+        if len(phase_buffer) < 200:
             continue
 
         current_data = list(phase_buffer)
@@ -216,29 +238,8 @@ def calculate_bpm_thread():
 
 
 # ===============================
-# LIFECYCLE
+# LIFECYCLE (Moved to lifespan context manager)
 # ===============================
-@app.on_event("startup")
-def startup_event():
-    threading.Thread(target=radar_thread, daemon=True).start()
-    threading.Thread(target=calculate_bpm_thread, daemon=True).start()
-    print("[Server] Started. Open http://localhost:8000 in your browser.")
-
-
-@app.on_event("shutdown")
-def shutdown_event():
-    global is_running
-    is_running = False
-    csv_file.close()
-    try:
-        if cli_serial and cli_serial.is_open:
-            cli_serial.write(b'sensorStop\n')
-            cli_serial.close()
-        if data_serial and data_serial.is_open:
-            data_serial.close()
-    except Exception:
-        pass
-    print(f"[Server] Shutdown complete. Data saved to: {CSV_FILE}")
 
 
 # ===============================
@@ -246,7 +247,7 @@ def shutdown_event():
 # ===============================
 @app.get("/")
 def get_html():
-    html_path = r"C:\Users\bala3\Downloads\mm\index.html"
+    html_path = os.path.join(os.path.dirname(__file__), "index.html")
     with open(html_path, "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
@@ -259,6 +260,14 @@ def get_status():
         "bpm": bpm_value,
         "samples": len(phase_buffer)
     })
+
+
+@app.post("/start_calibration")
+def start_calibration():
+    global phase_buffer, bpm_value
+    phase_buffer.clear()
+    bpm_value = 0
+    return JSONResponse({"status": "cleared"})
 
 
 @app.post("/stop")

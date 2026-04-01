@@ -281,10 +281,32 @@
 
     <div class="dashboard">
 
+        <!-- Demographics -->
+        <div class="demographics-row" id="demographics-row" style="display:flex; gap:1rem; margin-bottom:0.2rem; background:rgba(255,255,255,0.04); padding:1rem 1.5rem; border-radius:16px; border:1px solid rgba(255,255,255,0.08);">
+            <div style="flex:1;">
+                <label for="genderSelect" style="display:block; font-size:0.75rem; color:#64748b; margin-bottom:0.4rem; text-transform:uppercase; letter-spacing:1px;">Biological Sex</label>
+                <select id="genderSelect" style="width:100%; padding:0.6rem; border-radius:8px; background:#0f172a; color:#e2e8f0; border:1px solid rgba(255,255,255,0.1); outline:none; font-family:'Inter', sans-serif;">
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                </select>
+            </div>
+            <div style="flex:1;">
+                <label for="ageSelect" style="display:block; font-size:0.75rem; color:#64748b; margin-bottom:0.4rem; text-transform:uppercase; letter-spacing:1px;">Age Range</label>
+                <select id="ageSelect" style="width:100%; padding:0.6rem; border-radius:8px; background:#0f172a; color:#e2e8f0; border:1px solid rgba(255,255,255,0.1); outline:none; font-family:'Inter', sans-serif;">
+                    <option value="18-35">18 - 35 Years</option>
+                    <option value="36-55">36 - 55 Years</option>
+                    <option value="56+">56+ Years</option>
+                </select>
+            </div>
+            <div style="flex:1; display:flex; align-items:flex-end;">
+                <button id="startScanBtn" onclick="startCalibration()" style="width:100%; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; padding: 0.6rem; font-size: 0.95rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-family: 'Inter', sans-serif; transition: all 0.2s ease;">▶ Start Scanning</button>
+            </div>
+        </div>
+
         <!-- Countdown -->
         <div id="countdown-section">
-            <p>Sensor calibrating — prediction begins in</p>
-            <div id="tick">30</div>
+            <p id="countdown-msg">Please pick your demographics and click Start Scanning.</p>
+            <div id="tick" style="display:none;">10</div>
         </div>
 
         <!-- Metrics row (hidden until countdown ends) -->
@@ -375,12 +397,14 @@
         // =========================================================
         //  State
         // =========================================================
-        let countdown = 30;
+        let countdown = 10;
+        let countdownActive = false;
         let calibrated = false;
         let sampleCount = 0;
         let lastBpm = 0;
         let ws = null;
         let isStopped = false;
+        let simulatedTime = 0;
 
         const tickEl = document.getElementById('tick');
         const bpmValEl = document.getElementById('bpmVal');
@@ -393,19 +417,42 @@
         const statusTextEl = document.getElementById('status-text');
 
         // =========================================================
-        //  Countdown Timer
+        //  Countdown Timer / Start Action
         // =========================================================
-        const cdInterval = setInterval(() => {
-            countdown--;
-            tickEl.innerText = countdown;
-            if (countdown <= 0) {
-                clearInterval(cdInterval);
-                // Swap sections
-                countdownSec.style.display = 'none';
-                metricsRow.style.display = 'grid';
-                calibrated = true;
-            }
-        }, 1000);
+        let cdInterval = null;
+
+        function startCalibration() {
+            document.getElementById('startScanBtn').disabled = true;
+            document.getElementById('startScanBtn').innerText = 'Scanning...';
+            document.getElementById('genderSelect').disabled = true;
+            document.getElementById('ageSelect').disabled = true;
+            
+            document.getElementById('countdown-msg').innerText = 'Sensor calibrating — prediction begins in';
+            document.getElementById('tick').style.display = 'block';
+
+            // Connect to python start endpoint to clear sliding buffers
+            fetch('http://localhost:8000/start_calibration', { method: 'POST' })
+                .then(r => r.json())
+                .then(d => {
+                    countdownActive = true;
+                    // Reset chart for a fresh visualization
+                    chart.data.labels = [];
+                    chart.data.datasets[0].data = [];
+                    sampleCount = 0;
+                    
+                    cdInterval = setInterval(() => {
+                        countdown--;
+                        tickEl.innerText = countdown;
+                        if (countdown <= 0) {
+                            clearInterval(cdInterval);
+                            // Swap sections
+                            countdownSec.style.display = 'none';
+                            metricsRow.style.display = 'grid';
+                            calibrated = true;
+                        }
+                    }, 1000);
+                });
+        }
 
         // =========================================================
         //  WebSocket connection — always point to backend
@@ -430,8 +477,19 @@
                     sampleCount++;
 
                     // --- Update chart ---
+                    if (calibrated && d.bpm > 0) {
+                        let freq = d.bpm / 60.0;
+                        simulatedTime += 0.05; // 20 fps
+                        // Harmonic synthesis for simulated PPG pulse
+                        let fundamental = Math.sin(2 * Math.PI * freq * simulatedTime);
+                        let harmonic = 0.4 * Math.sin(2 * Math.PI * (2 * freq) * simulatedTime + Math.PI/4);
+                        let cleanPoint = fundamental + harmonic;
+                        chart.data.datasets[0].data.push(cleanPoint);
+                    } else {
+                        chart.data.datasets[0].data.push(d.phase);
+                    }
                     chart.data.labels.push(d.timestamp.toFixed(1));
-                    chart.data.datasets[0].data.push(d.phase);
+                    
                     if (chart.data.labels.length > MAX_POINTS) {
                         chart.data.labels.shift();
                         chart.data.datasets[0].data.shift();
@@ -486,11 +544,25 @@
             bpmValEl.innerText = bpm;
             bpmValEl.classList.remove('calibrating', 'warning', 'danger');
 
-            if (bpm < 50 || bpm > 120) {
+            const gender = document.getElementById('genderSelect').value;
+            const age = document.getElementById('ageSelect').value;
+
+            let minNormal = 60, maxNormal = 100;
+            if (gender === 'male') {
+                if (age === '18-35') { minNormal = 55; maxNormal = 85; }
+                else if (age === '36-55') { minNormal = 57; maxNormal = 86; }
+                else { minNormal = 56; maxNormal = 83; } // 56+
+            } else { // female
+                if (age === '18-35') { minNormal = 59; maxNormal = 89; }
+                else if (age === '36-55') { minNormal = 61; maxNormal = 90; }
+                else { minNormal = 60; maxNormal = 88; } // 56+
+            }
+
+            if (bpm < minNormal - 10 || bpm > maxNormal + 15) {
                 bpmValEl.classList.add('danger');
                 bpmStatusEl.innerText = '⚠ Abnormal';
                 bpmStatusEl.style.color = '#ef4444';
-            } else if (bpm < 60 || bpm > 100) {
+            } else if (bpm < minNormal || bpm > maxNormal) {
                 bpmValEl.classList.add('warning');
                 bpmStatusEl.innerText = '● Borderline';
                 bpmStatusEl.style.color = '#f97316';
